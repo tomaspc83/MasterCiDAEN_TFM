@@ -1,0 +1,145 @@
+
+# Nombre del servicio
+service: sentiment-analysis
+
+# Versión del framework
+frameworkVersion: '2'
+
+# Proveedor de servicios en la nube
+provider:
+  name: aws
+  runtime: python3.8
+  lambdaHashingVersion: 20201221
+  stage: dev
+  region: us-east-1
+
+# Variables de entorno compartidas para todos los servicios
+  environment:
+    REGION: us-east-1
+
+# Configuración de permisos de acceso
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action: "*"
+      Resource: "*"
+
+# Configuración de empaquetado de librerías que se usan en las lambda
+package:
+  exclude:
+    - node_modules/**
+    - layers/**
+
+
+#Definición de funciones lambda
+functions:
+  trigger_process:
+    handler: handler_trigger.trigger_process
+    events:
+      - httpApi:
+          path: /trigger_process
+          method: get
+
+    environment:
+      TOPIC_ARN: { Ref: MySNSTopic }
+    
+  get_tweets:
+    handler: handler_tweets.get_tweets
+    timeout: 30
+    events:
+      - sns:
+          arn: !Ref MySNSTopic
+          topicName: trigger_message
+    
+    layers:
+      - {Ref: TweepyLambdaLayer }
+
+    environment:
+      QUEUE_URL: { Ref: MySQS }
+      USER_ID: H6UFCAg0yfiYRjESSwdkMDQGC
+      PASS_KEY: iqiM2j0XvK8Q1WzgdmUTYCnUHfXDJ2fqcJvwkB56YEOVJOew9z
+      ACCESS_TOKEN: 139041030-VCSNagPSbknNaoUxpoxFjHLUCDUbMdYlB9dXWXfl
+      ACCESS_TOKEN_SECRET: gq4DYHBlHXJDQhc9pdBgOCG51L3UJnUwU0ZJpzcFMLPWI
+      KEY_WORDS: '#CORONAVIRUS OR #COVID OR #COVID-19 OR #SARS OR #SARS-CoV'
+      
+  analyze_tweets:
+    handler: handler_analysis.analyze_tweets
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - MySQS
+              - Arn
+    environment:
+      TABLE_TWEETS: { Ref: DynamoTableTweets }
+
+  compute_statistics:
+    handler: handler_statistics.compute_statistics
+    events:
+      - stream:
+          type: dynamodb
+          arn:
+            Fn::GetAtt: [ DynamoTableTweets, StreamArn ]
+    environment:
+      TABLE_STATISTICS: { Ref: DynamoTableStatistics }
+
+#Definición de recursos utilizados
+resources:
+  Resources:
+    MySNSTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: trigger_message
+  
+    MySQS:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: new_tweets
+
+    DynamoTableTweets:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: tweets
+        AttributeDefinitions:
+          - AttributeName: tweet_id
+            AttributeType: S
+          - AttributeName: tweet_date
+            AttributeType: S
+
+        KeySchema:
+          - AttributeName: tweet_date
+            KeyType: HASH
+          - AttributeName: tweet_id
+            KeyType: RANGE
+
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+
+        StreamSpecification:
+          StreamViewType: NEW_IMAGE
+
+    DynamoTableStatistics:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: tweets_statistics
+        AttributeDefinitions:
+          - AttributeName: TweetDate
+            AttributeType: S
+
+        KeySchema:
+          - AttributeName: TweetDate
+            KeyType: HASH
+
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+    
+
+plugins:
+  - serverless-python-requirements
+
+# Definición de layer a usar donde se empaqueta la API de tweeter (tweepy)
+layers:
+  tweepy:
+    path: ./layers
+    description: Layer to use tweepy API

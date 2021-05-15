@@ -1,0 +1,752 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "The AWS CloudFormation template for this Serverless application",
+  "Resources": {
+    "ServerlessDeploymentBucket": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ServerlessDeploymentBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {
+          "Ref": "ServerlessDeploymentBucket"
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition"
+                      },
+                      ":s3:::",
+                      {
+                        "Ref": "ServerlessDeploymentBucket"
+                      },
+                      "/*"
+                    ]
+                  ]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition"
+                      },
+                      ":s3:::",
+                      {
+                        "Ref": "ServerlessDeploymentBucket"
+                      }
+                    ]
+                  ]
+                }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": false
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "TriggerUnderscoreprocessLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/sentiment-analysis-dev-trigger_process"
+      }
+    },
+    "GetUnderscoretweetsLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/sentiment-analysis-dev-get_tweets"
+      }
+    },
+    "AnalyzeUnderscoretweetsLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/sentiment-analysis-dev-analyze_tweets"
+      }
+    },
+    "ComputeUnderscorestatisticsLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/sentiment-analysis-dev-compute_statistics"
+      }
+    },
+    "IamRoleLambdaExecution": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "lambda.amazonaws.com"
+                ]
+              },
+              "Action": [
+                "sts:AssumeRole"
+              ]
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": {
+              "Fn::Join": [
+                "-",
+                [
+                  "sentiment-analysis",
+                  "dev",
+                  "lambda"
+                ]
+              ]
+            },
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:CreateLogGroup"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/sentiment-analysis-dev*:*"
+                    }
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/sentiment-analysis-dev*:*:*"
+                    }
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "*"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "dynamodb:GetRecords",
+                    "dynamodb:GetShardIterator",
+                    "dynamodb:DescribeStream",
+                    "dynamodb:ListStreams"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::GetAtt": [
+                        "DynamoTableTweets",
+                        "StreamArn"
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "sqs:ReceiveMessage",
+                    "sqs:DeleteMessage",
+                    "sqs:GetQueueAttributes"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::GetAtt": [
+                        "MySQS",
+                        "Arn"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "Path": "/",
+        "RoleName": {
+          "Fn::Join": [
+            "-",
+            [
+              "sentiment-analysis",
+              "dev",
+              {
+                "Ref": "AWS::Region"
+              },
+              "lambdaRole"
+            ]
+          ]
+        }
+      }
+    },
+    "TweepyLambdaLayer": {
+      "Type": "AWS::Lambda::LayerVersion",
+      "Properties": {
+        "Content": {
+          "S3Bucket": {
+            "Ref": "ServerlessDeploymentBucket"
+          },
+          "S3Key": "serverless/sentiment-analysis/dev/1621075227694-2021-05-15T10:40:27.694Z/tweepy.zip"
+        },
+        "LayerName": "tweepy",
+        "Description": "Layer to use tweepy API"
+      }
+    },
+    "TriggerUnderscoreprocessLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Code": {
+          "S3Bucket": {
+            "Ref": "ServerlessDeploymentBucket"
+          },
+          "S3Key": "serverless/sentiment-analysis/dev/1621075227694-2021-05-15T10:40:27.694Z/sentiment-analysis.zip"
+        },
+        "Handler": "handler_trigger.trigger_process",
+        "Runtime": "python3.8",
+        "FunctionName": "sentiment-analysis-dev-trigger_process",
+        "MemorySize": 1024,
+        "Timeout": 6,
+        "Environment": {
+          "Variables": {
+            "REGION": "us-east-1",
+            "TOPIC_ARN": {
+              "Ref": "MySNSTopic"
+            }
+          }
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "IamRoleLambdaExecution",
+            "Arn"
+          ]
+        }
+      },
+      "DependsOn": [
+        "TriggerUnderscoreprocessLogGroup"
+      ]
+    },
+    "GetUnderscoretweetsLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Code": {
+          "S3Bucket": {
+            "Ref": "ServerlessDeploymentBucket"
+          },
+          "S3Key": "serverless/sentiment-analysis/dev/1621075227694-2021-05-15T10:40:27.694Z/sentiment-analysis.zip"
+        },
+        "Handler": "handler_tweets.get_tweets",
+        "Runtime": "python3.8",
+        "FunctionName": "sentiment-analysis-dev-get_tweets",
+        "MemorySize": 1024,
+        "Timeout": 30,
+        "Environment": {
+          "Variables": {
+            "REGION": "us-east-1",
+            "QUEUE_URL": {
+              "Ref": "MySQS"
+            },
+            "USER_ID": "H6UFCAg0yfiYRjESSwdkMDQGC",
+            "PASS_KEY": "iqiM2j0XvK8Q1WzgdmUTYCnUHfXDJ2fqcJvwkB56YEOVJOew9z",
+            "ACCESS_TOKEN": "139041030-VCSNagPSbknNaoUxpoxFjHLUCDUbMdYlB9dXWXfl",
+            "ACCESS_TOKEN_SECRET": "gq4DYHBlHXJDQhc9pdBgOCG51L3UJnUwU0ZJpzcFMLPWI",
+            "KEY_WORDS": "#CORONAVIRUS OR #COVID OR #COVID-19 OR #SARS OR #SARS-CoV"
+          }
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "IamRoleLambdaExecution",
+            "Arn"
+          ]
+        },
+        "Layers": [
+          {
+            "Ref": "TweepyLambdaLayer"
+          }
+        ]
+      },
+      "DependsOn": [
+        "GetUnderscoretweetsLogGroup"
+      ]
+    },
+    "AnalyzeUnderscoretweetsLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Code": {
+          "S3Bucket": {
+            "Ref": "ServerlessDeploymentBucket"
+          },
+          "S3Key": "serverless/sentiment-analysis/dev/1621075227694-2021-05-15T10:40:27.694Z/sentiment-analysis.zip"
+        },
+        "Handler": "handler_analysis.analyze_tweets",
+        "Runtime": "python3.8",
+        "FunctionName": "sentiment-analysis-dev-analyze_tweets",
+        "MemorySize": 1024,
+        "Timeout": 6,
+        "Environment": {
+          "Variables": {
+            "REGION": "us-east-1",
+            "TABLE_TWEETS": {
+              "Ref": "DynamoTableTweets"
+            }
+          }
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "IamRoleLambdaExecution",
+            "Arn"
+          ]
+        }
+      },
+      "DependsOn": [
+        "AnalyzeUnderscoretweetsLogGroup"
+      ]
+    },
+    "ComputeUnderscorestatisticsLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Code": {
+          "S3Bucket": {
+            "Ref": "ServerlessDeploymentBucket"
+          },
+          "S3Key": "serverless/sentiment-analysis/dev/1621075227694-2021-05-15T10:40:27.694Z/sentiment-analysis.zip"
+        },
+        "Handler": "handler_statistics.compute_statistics",
+        "Runtime": "python3.8",
+        "FunctionName": "sentiment-analysis-dev-compute_statistics",
+        "MemorySize": 1024,
+        "Timeout": 6,
+        "Environment": {
+          "Variables": {
+            "REGION": "us-east-1",
+            "TABLE_STATISTICS": {
+              "Ref": "DynamoTableStatistics"
+            }
+          }
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "IamRoleLambdaExecution",
+            "Arn"
+          ]
+        }
+      },
+      "DependsOn": [
+        "ComputeUnderscorestatisticsLogGroup"
+      ]
+    },
+    "TriggerUnderscoreprocessLambdaVersionQPvy1ZAdbmL89H24wiDIQA8K4aPrIuM6zfC8Am8a9E8": {
+      "Type": "AWS::Lambda::Version",
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "TriggerUnderscoreprocessLambdaFunction"
+        },
+        "CodeSha256": "g48GPswR6wgqoUNhWO6sJZ+cAU6wUxjlhUAfJdBNTHw="
+      }
+    },
+    "AnalyzeUnderscoretweetsLambdaVersionagQUUkNwRv7q1TTSLO6k7e6bLpaFVwdDEgfqiebnCk": {
+      "Type": "AWS::Lambda::Version",
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "AnalyzeUnderscoretweetsLambdaFunction"
+        },
+        "CodeSha256": "g48GPswR6wgqoUNhWO6sJZ+cAU6wUxjlhUAfJdBNTHw="
+      }
+    },
+    "ComputeUnderscorestatisticsLambdaVersion3sIFPaA03II72amc33BvUxxLNdR1OV9gk6aXyF3DXQI": {
+      "Type": "AWS::Lambda::Version",
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "ComputeUnderscorestatisticsLambdaFunction"
+        },
+        "CodeSha256": "g48GPswR6wgqoUNhWO6sJZ+cAU6wUxjlhUAfJdBNTHw="
+      }
+    },
+    "GetUnderscoretweetsLambdaVersionFUKSCgascNSdBwp9I110HHAz0pdzRGyyUsb9Y6Ce8": {
+      "Type": "AWS::Lambda::Version",
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "GetUnderscoretweetsLambdaFunction"
+        },
+        "CodeSha256": "g48GPswR6wgqoUNhWO6sJZ+cAU6wUxjlhUAfJdBNTHw="
+      }
+    },
+    "GetUnderscoretweetsSnsSubscriptionTriggermessage": {
+      "Type": "AWS::SNS::Subscription",
+      "Properties": {
+        "TopicArn": {
+          "Ref": "MySNSTopic"
+        },
+        "Protocol": "lambda",
+        "Endpoint": {
+          "Fn::GetAtt": [
+            "GetUnderscoretweetsLambdaFunction",
+            "Arn"
+          ]
+        }
+      }
+    },
+    "GetUnderscoretweetsLambdaPermissionTriggermessageSNS": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "GetUnderscoretweetsLambdaFunction",
+            "Arn"
+          ]
+        },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "sns.amazonaws.com",
+        "SourceArn": {
+          "Ref": "MySNSTopic"
+        }
+      }
+    },
+    "ComputeUnderscorestatisticsEventSourceMappingDynamodbDynamoTableTweets": {
+      "Type": "AWS::Lambda::EventSourceMapping",
+      "DependsOn": [
+        "IamRoleLambdaExecution"
+      ],
+      "Properties": {
+        "BatchSize": 10,
+        "EventSourceArn": {
+          "Fn::GetAtt": [
+            "DynamoTableTweets",
+            "StreamArn"
+          ]
+        },
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "ComputeUnderscorestatisticsLambdaFunction",
+            "Arn"
+          ]
+        },
+        "StartingPosition": "TRIM_HORIZON",
+        "Enabled": true
+      }
+    },
+    "AnalyzeUnderscoretweetsEventSourceMappingSQSMySQS": {
+      "Type": "AWS::Lambda::EventSourceMapping",
+      "DependsOn": [
+        "IamRoleLambdaExecution"
+      ],
+      "Properties": {
+        "BatchSize": 10,
+        "EventSourceArn": {
+          "Fn::GetAtt": [
+            "MySQS",
+            "Arn"
+          ]
+        },
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "AnalyzeUnderscoretweetsLambdaFunction",
+            "Arn"
+          ]
+        },
+        "Enabled": true
+      }
+    },
+    "HttpApi": {
+      "Type": "AWS::ApiGatewayV2::Api",
+      "Properties": {
+        "Name": "dev-sentiment-analysis",
+        "ProtocolType": "HTTP"
+      }
+    },
+    "HttpApiStage": {
+      "Type": "AWS::ApiGatewayV2::Stage",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "StageName": "$default",
+        "AutoDeploy": true,
+        "DefaultRouteSettings": {
+          "DetailedMetricsEnabled": false
+        }
+      }
+    },
+    "TriggerUnderscoreprocessLambdaPermissionHttpApi": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "TriggerUnderscoreprocessLambdaFunction",
+            "Arn"
+          ]
+        },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":execute-api:",
+              {
+                "Ref": "AWS::Region"
+              },
+              ":",
+              {
+                "Ref": "AWS::AccountId"
+              },
+              ":",
+              {
+                "Ref": "HttpApi"
+              },
+              "/*"
+            ]
+          ]
+        }
+      }
+    },
+    "HttpApiIntegrationTriggerUnderscoreprocess": {
+      "Type": "AWS::ApiGatewayV2::Integration",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "IntegrationType": "AWS_PROXY",
+        "IntegrationUri": {
+          "Fn::GetAtt": [
+            "TriggerUnderscoreprocessLambdaFunction",
+            "Arn"
+          ]
+        },
+        "PayloadFormatVersion": "2.0",
+        "TimeoutInMillis": 6500
+      }
+    },
+    "HttpApiRouteGetTriggerprocess": {
+      "Type": "AWS::ApiGatewayV2::Route",
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApi"
+        },
+        "RouteKey": "GET /trigger_process",
+        "Target": {
+          "Fn::Join": [
+            "/",
+            [
+              "integrations",
+              {
+                "Ref": "HttpApiIntegrationTriggerUnderscoreprocess"
+              }
+            ]
+          ]
+        }
+      },
+      "DependsOn": "HttpApiIntegrationTriggerUnderscoreprocess"
+    },
+    "MySNSTopic": {
+      "Type": "AWS::SNS::Topic",
+      "Properties": {
+        "TopicName": "trigger_message"
+      }
+    },
+    "MySQS": {
+      "Type": "AWS::SQS::Queue",
+      "Properties": {
+        "QueueName": "new_tweets"
+      }
+    },
+    "DynamoTableTweets": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "TableName": "tweets",
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "tweet_id",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "tweet_date",
+            "AttributeType": "S"
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "tweet_date",
+            "KeyType": "HASH"
+          },
+          {
+            "AttributeName": "tweet_id",
+            "KeyType": "RANGE"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 5,
+          "WriteCapacityUnits": 5
+        },
+        "StreamSpecification": {
+          "StreamViewType": "NEW_IMAGE"
+        }
+      }
+    },
+    "DynamoTableStatistics": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "TableName": "tweets_statistics",
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "TweetDate",
+            "AttributeType": "S"
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "TweetDate",
+            "KeyType": "HASH"
+          }
+        ],
+        "ProvisionedThroughput": {
+          "ReadCapacityUnits": 5,
+          "WriteCapacityUnits": 5
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "ServerlessDeploymentBucketName": {
+      "Value": {
+        "Ref": "ServerlessDeploymentBucket"
+      },
+      "Export": {
+        "Name": "sls-sentiment-analysis-dev-ServerlessDeploymentBucketName"
+      }
+    },
+    "TweepyLambdaLayerQualifiedArn": {
+      "Description": "Current Lambda layer version",
+      "Value": {
+        "Ref": "TweepyLambdaLayer"
+      },
+      "Export": {
+        "Name": "sls-sentiment-analysis-dev-TweepyLambdaLayerQualifiedArn"
+      }
+    },
+    "TweepyLambdaLayerHash": {
+      "Description": "Current Lambda layer hash",
+      "Value": "c828bcf7b843909a4ec0b40dbe5a9ff7a4865185",
+      "Export": {
+        "Name": "sls-sentiment-analysis-dev-TweepyLambdaLayerHash"
+      }
+    },
+    "TweepyLambdaLayerS3Key": {
+      "Description": "Current Lambda layer S3Key",
+      "Value": "serverless/sentiment-analysis/dev/1621075227694-2021-05-15T10:40:27.694Z/tweepy.zip",
+      "Export": {
+        "Name": "sls-sentiment-analysis-dev-TweepyLambdaLayerS3Key"
+      }
+    },
+    "TriggerUnderscoreprocessLambdaFunctionQualifiedArn": {
+      "Description": "Current Lambda function version",
+      "Value": {
+        "Ref": "TriggerUnderscoreprocessLambdaVersionQPvy1ZAdbmL89H24wiDIQA8K4aPrIuM6zfC8Am8a9E8"
+      },
+      "Export": {
+        "Name": "sls-sentiment-analysis-dev-TriggerUnderscoreprocessLambdaFunctionQualifiedArn"
+      }
+    },
+    "AnalyzeUnderscoretweetsLambdaFunctionQualifiedArn": {
+      "Description": "Current Lambda function version",
+      "Value": {
+        "Ref": "AnalyzeUnderscoretweetsLambdaVersionagQUUkNwRv7q1TTSLO6k7e6bLpaFVwdDEgfqiebnCk"
+      },
+      "Export": {
+        "Name": "sls-sentiment-analysis-dev-AnalyzeUnderscoretweetsLambdaFunctionQualifiedArn"
+      }
+    },
+    "ComputeUnderscorestatisticsLambdaFunctionQualifiedArn": {
+      "Description": "Current Lambda function version",
+      "Value": {
+        "Ref": "ComputeUnderscorestatisticsLambdaVersion3sIFPaA03II72amc33BvUxxLNdR1OV9gk6aXyF3DXQI"
+      },
+      "Export": {
+        "Name": "sls-sentiment-analysis-dev-ComputeUnderscorestatisticsLambdaFunctionQualifiedArn"
+      }
+    },
+    "GetUnderscoretweetsLambdaFunctionQualifiedArn": {
+      "Description": "Current Lambda function version",
+      "Value": {
+        "Ref": "GetUnderscoretweetsLambdaVersionFUKSCgascNSdBwp9I110HHAz0pdzRGyyUsb9Y6Ce8"
+      },
+      "Export": {
+        "Name": "sls-sentiment-analysis-dev-GetUnderscoretweetsLambdaFunctionQualifiedArn"
+      }
+    },
+    "HttpApiId": {
+      "Description": "Id of the HTTP API",
+      "Value": {
+        "Ref": "HttpApi"
+      },
+      "Export": {
+        "Name": "sls-sentiment-analysis-dev-HttpApiId"
+      }
+    },
+    "HttpApiUrl": {
+      "Description": "URL of the HTTP API",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "https://",
+            {
+              "Ref": "HttpApi"
+            },
+            ".execute-api.",
+            {
+              "Ref": "AWS::Region"
+            },
+            ".",
+            {
+              "Ref": "AWS::URLSuffix"
+            }
+          ]
+        ]
+      },
+      "Export": {
+        "Name": "sls-sentiment-analysis-dev-HttpApiUrl"
+      }
+    }
+  }
+}
